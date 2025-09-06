@@ -1,0 +1,147 @@
+# Import libraries
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Flatten, Conv2D, MaxPooling2D, Dropout, BatchNormalization
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from sklearn.model_selection import train_test_split
+
+# 1. Dataset Loading & Preprocessing
+fashion_mnist = tf.keras.datasets.fashion_mnist
+(x_train, y_train), (x_test, y_test) = fashion_mnist.load_data()
+
+# Normalize pixel values
+x_train = x_train / 255.0
+x_test = x_test / 255.0
+
+# Class names
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+
+# Visualize 16 random sample images
+plt.figure(figsize=(8,8))
+indices = np.random.choice(range(len(x_train)), size=16, replace=False)
+for i, idx in enumerate(indices):
+    plt.subplot(4,4,i+1)
+    plt.imshow(x_train[idx], cmap='gray')
+    plt.title(class_names[y_train[idx]])
+    plt.axis('off')
+plt.tight_layout()
+plt.show()
+
+# 2. Baseline Model (MLP)
+mlp = Sequential([
+    Flatten(input_shape=(28,28)),
+    Dense(128, activation='relu'),
+    Dense(64, activation='relu'),
+    Dense(10, activation='softmax')
+])
+
+mlp.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+history_mlp = mlp.fit(x_train, y_train, epochs=10, validation_split=0.2, verbose=1)
+
+# Evaluate MLP
+test_loss_mlp, test_acc_mlp = mlp.evaluate(x_test, y_test, verbose=0)
+print(f"MLP Test Accuracy: {test_acc_mlp:.4f}")
+
+# 3. Convolutional Neural Network (CNN)
+x_train_cnn = x_train.reshape(-1,28,28,1)
+x_test_cnn = x_test.reshape(-1,28,28,1)
+
+cnn = Sequential([
+    Conv2D(32, (3,3), activation='relu', input_shape=(28,28,1)),
+    MaxPooling2D(2,2),
+    Conv2D(64, (3,3), activation='relu'),
+    MaxPooling2D(2,2),
+    Flatten(),
+    Dropout(0.5),
+    Dense(128, activation='relu'),
+    Dense(10, activation='softmax')
+])
+
+cnn.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+history_cnn = cnn.fit(x_train_cnn, y_train, epochs=10, validation_split=0.2, verbose=1)
+
+# Evaluate CNN
+test_loss_cnn, test_acc_cnn = cnn.evaluate(x_test_cnn, y_test, verbose=0)
+print(f"CNN Test Accuracy: {test_acc_cnn:.4f}")
+
+# Plot accuracy and loss
+plt.figure(figsize=(12,5))
+plt.subplot(1,2,1)
+plt.plot(history_cnn.history['accuracy'], label='Train Accuracy')
+plt.plot(history_cnn.history['val_accuracy'], label='Val Accuracy')
+plt.title('CNN Accuracy')
+plt.legend()
+plt.subplot(1,2,2)
+plt.plot(history_cnn.history['loss'], label='Train Loss')
+plt.plot(history_cnn.history['val_loss'], label='Val Loss')
+plt.title('CNN Loss')
+plt.legend()
+plt.show()
+
+# 4. Model Improvement (Data Augmentation + Batch Normalization)
+
+# Manually split data for validation
+x_train_aug, x_val_aug, y_train_aug, y_val_aug = train_test_split(x_train_cnn, y_train, test_size=0.2, random_state=42)
+
+
+datagen = ImageDataGenerator(
+    rotation_range=15,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True
+)
+datagen.fit(x_train_aug)
+
+cnn_aug = Sequential([
+    Conv2D(32, (3,3), activation='relu', input_shape=(28,28,1)),
+    BatchNormalization(),
+    MaxPooling2D(2,2),
+    Conv2D(64, (3,3), activation='relu'),
+    BatchNormalization(),
+    MaxPooling2D(2,2),
+    Flatten(),
+    Dropout(0.5),
+    Dense(128, activation='relu'),
+    Dense(10, activation='softmax')
+])
+
+cnn_aug.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+history_aug = cnn_aug.fit(datagen.flow(x_train_aug, y_train_aug, batch_size=64),
+                          epochs=15, validation_data=(x_val_aug, y_val_aug), verbose=1)
+
+# Evaluate CNN with augmentation
+test_loss_aug, test_acc_aug = cnn_aug.evaluate(x_test_cnn, y_test, verbose=0)
+print(f"CNN with Augmentation Test Accuracy: {test_acc_aug:.4f}")
+
+# 5. Evaluation: Confusion Matrix & Misclassified Images
+y_pred = cnn_aug.predict(x_test_cnn)
+y_pred_classes = y_pred.argmax(axis=1)
+
+# Confusion matrix
+cm = confusion_matrix(y_test, y_pred_classes)
+plt.figure(figsize=(8,6))
+sns.heatmap(cm, annot=True, fmt="d", cmap='Blues', xticklabels=class_names, yticklabels=class_names)
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.show()
+
+# Classification report
+print("Classification Report:")
+print(classification_report(y_test, y_pred_classes, target_names=class_names))
+
+# Display some misclassified images
+misclassified_idx = np.where(y_test != y_pred_classes)[0]
+plt.figure(figsize=(10,10))
+for i, idx in enumerate(misclassified_idx[:9]):
+    plt.subplot(3,3,i+1)
+    plt.imshow(x_test[idx], cmap='gray')
+    plt.title(f"True: {class_names[y_test[idx]]}\nPred: {class_names[y_pred_classes[idx]]}")
+    plt.axis('off')
+plt.tight_layout()
+plt.show()
